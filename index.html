@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>⛳ 골프 라운딩 메이트</title>
+<style>
+  :root {
+    --green: #1f8a4c;
+    --green-dark: #14622f;
+    --bg: #f3f7f3;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+    background: var(--bg);
+    display: flex;
+    justify-content: center;
+  }
+  .app {
+    width: 100%;
+    max-width: 480px;
+    height: 100vh;
+    background: #fff;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 0 20px rgba(0,0,0,0.08);
+  }
+  header {
+    background: linear-gradient(135deg, var(--green), var(--green-dark));
+    color: #fff;
+    padding: 16px;
+    text-align: center;
+  }
+  header h1 { margin: 0; font-size: 18px; }
+  header p { margin: 4px 0 0; font-size: 12px; opacity: 0.9; }
+
+  .quick-menu {
+    display: flex;
+    gap: 8px;
+    padding: 10px;
+    overflow-x: auto;
+    background: #eef5ee;
+    border-bottom: 1px solid #ddebdd;
+  }
+  .quick-menu button {
+    flex: none;
+    border: 1px solid var(--green);
+    background: #fff;
+    color: var(--green-dark);
+    border-radius: 16px;
+    padding: 6px 12px;
+    font-size: 12px;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .quick-menu button:hover { background: var(--green); color: #fff; }
+
+  .messages {
+    flex: 1;
+    padding: 16px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .msg {
+    max-width: 85%;
+    padding: 10px 14px;
+    border-radius: 14px;
+    font-size: 14px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+  }
+  .msg.bot {
+    background: #eef5ee;
+    color: #222;
+    align-self: flex-start;
+    border-bottom-left-radius: 4px;
+  }
+  .msg.user {
+    background: var(--green);
+    color: #fff;
+    align-self: flex-end;
+    border-bottom-right-radius: 4px;
+  }
+
+  form {
+    display: flex;
+    gap: 8px;
+    padding: 10px;
+    border-top: 1px solid #eee;
+  }
+  form input {
+    flex: 1;
+    padding: 10px 12px;
+    border-radius: 18px;
+    border: 1px solid #ccc;
+    font-size: 14px;
+    outline: none;
+  }
+  form input:focus { border-color: var(--green); }
+  form button {
+    background: var(--green);
+    color: #fff;
+    border: none;
+    border-radius: 18px;
+    padding: 0 18px;
+    font-size: 14px;
+    cursor: pointer;
+  }
+  form button:hover { background: var(--green-dark); }
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <h1>⛳ 골프 라운딩 메이트</h1>
+    <p>날씨 · 이동 · 맛집까지 토탈 케어</p>
+  </header>
+
+  <div class="quick-menu">
+    <button data-cmd="날씨">🌤️ 날씨 체크</button>
+    <button data-cmd="경로">🚗 출발/경로</button>
+    <button data-cmd="맛집">🍽️ 맛집 추천</button>
+    <button data-cmd="준비물">🎒 준비물</button>
+    <button data-cmd="처음">↩️ 처음으로</button>
+  </div>
+
+  <div class="messages" id="messages"></div>
+
+  <form id="chat-form">
+    <input id="chat-input" type="text" placeholder="메시지를 입력하세요..." autocomplete="off" />
+    <button type="submit">전송</button>
+  </form>
+</div>
+
+<script>
+const messagesEl = document.getElementById('messages');
+const form = document.getElementById('chat-form');
+const input = document.getElementById('chat-input');
+
+// ---- session state ----
+let state = {
+  flow: null,        // 'weather' | 'route' | 'food' | null
+  step: 0,
+  data: {}
+};
+
+function addMessage(text, sender) {
+  const div = document.createElement('div');
+  div.className = `msg ${sender}`;
+  div.textContent = text;
+  messagesEl.appendChild(div);
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+}
+
+function botSay(text) {
+  setTimeout(() => addMessage(text, 'bot'), 250);
+}
+
+// ---- mock data helpers ----
+function seededRandom(seed) {
+  let x = Math.sin(seed) * 10000;
+  return x - Math.floor(x);
+}
+function hashStr(str) {
+  let h = 0;
+  for (let i = 0; i < str.length; i++) h = (h * 31 + str.charCodeAt(i)) % 100000;
+  return h;
+}
+
+function mockWeather(course, date) {
+  const seed = hashStr(course + date);
+  const temp = Math.round(10 + seededRandom(seed) * 20);
+  const feels = temp - Math.round(seededRandom(seed + 1) * 3);
+  const rain = Math.round(seededRandom(seed + 2) * 100);
+  const windOptions = ['약함 (2~3m/s)', '보통 (4~6m/s)', '강함 (7m/s 이상)'];
+  const wind = windOptions[Math.floor(seededRandom(seed + 3) * windOptions.length)];
+  const skyOptions = ['맑음 ☀️', '구름 조금 🌤️', '구름 많음 ☁️', '비 🌧️'];
+  let sky = skyOptions[Math.floor(seededRandom(seed + 4) * skyOptions.length)];
+  if (rain > 60) sky = '비 🌧️';
+  return { temp, feels, rain, wind, sky };
+}
+
+function weatherTip(w) {
+  const tips = [];
+  if (w.sky.includes('비')) {
+    tips.push('☔ 우천 가능성이 높아요. 우산/우비, 여분 양말, 그립감 좋은 우천용 장갑을 챙기세요.');
+    tips.push('실내 골프 연습장이나 스크린 골프로 일정을 변경하는 것도 고려해보세요.');
+  } else if (w.temp >= 27) {
+    tips.push('🔥 더운 날씨예요. 통풍 잘 되는 옷, 자외선 차단제, 충분한 수분 섭취를 챙기세요.');
+  } else if (w.temp <= 12) {
+    tips.push('🧥 쌀쌀해요. 보온 이너웨어와 바람막이를 준비하시고, 손 시림 방지 장갑도 추천해요.');
+  } else {
+    tips.push('👕 라운딩하기 쾌적한 날씨예요! 가벼운 레이어드 룩을 추천합니다.');
+  }
+  if (w.wind.includes('강함')) {
+    tips.push('💨 바람이 강해요. 클럽 선택과 스윙 시 바람 영향을 고려하세요. 모자는 끈으로 고정하는 게 좋아요.');
+  }
+  return tips.join('\n');
+}
+
+function mockRoute(origin, course, teeTime) {
+  const seed = hashStr(origin + course);
+  const baseMin = 30 + Math.floor(seededRandom(seed) * 90);
+  const traffic = Math.floor(seededRandom(seed + 1) * 20);
+  const totalMin = baseMin + traffic;
+  return { baseMin, traffic, totalMin };
+}
+
+function subtractMinutes(timeStr, minutes) {
+  const [h, m] = timeStr.split(':').map(Number);
+  const date = new Date();
+  date.setHours(h, m - minutes, 0, 0);
+  const hh = String(date.getHours()).padStart(2, '0');
+  const mm = String(date.getMinutes()).padStart(2, '0');
+  return `${hh}:${mm}`;
+}
+
+const restaurantDB = {
+  '한식': [
+    { name: '들녘 한정식', menu: '갈비찜 정식, 한정식 코스', note: '단체룸 보유, 예약 필수' },
+    { name: '청송 손두부', menu: '순두부찌개, 모듬전', note: '대기 가능, 주차 넉넉' }
+  ],
+  '고기': [
+    { name: '숯불애 본점', menu: '생갈비, 항정살', note: '룸 4개, 예약 추천' },
+    { name: '한우마당', menu: '한우 모듬, 된장찌개', note: '단체석 가능' }
+  ],
+  '일식': [
+    { name: '스시 하루', menu: '오마카세, 모듬초밥', note: '런치 코스 추천' },
+    { name: '우동가', menu: '가마우동, 가츠동', note: '캐주얼, 빠른 식사' }
+  ],
+  '해산물': [
+    { name: '바다향 횟집', menu: '모듬회, 해물탕', note: '단체룸, 주류 있음' },
+    { name: '동해수산', menu: '활어회, 매운탕', note: '주차 가능, 예약 권장' }
+  ]
+};
+
+const checklist = [
+  '⛳ 골프채(클럽 세트) 및 캐디백',
+  '👟 골프화 (여분 양말 포함)',
+  '🧢 모자/캡 & 선글라스',
+  '🧴 자외선 차단제',
+  '🧤 골프 장갑 (여분 1개)',
+  '⛅ 우산/우비 (날씨 확인 후)',
+  '💧 물/이온음료, 간단한 간식',
+  '📱 보조배터리, 골프 거리측정기/GPS 앱',
+  '💳 그린피/캐디피 결제 수단',
+  '🩹 간단한 구급약, 밴드'
+];
+
+function showWeatherFollowup() {
+  botSay('🌤️ 날씨 체크 기능이에요! 라운딩 예정 날짜와 골프장 이름을 알려주세요.\n예) "6/21 남서울 컨트리클럽"');
+  state.flow = 'weather';
+  state.step = 1;
+}
+function showRouteFollowup() {
+  botSay('🚗 출발 시간/경로 안내 기능이에요! 출발지, 골프장, 티오프 시간을 알려주세요.\n예) "강남역, 레이크사이드CC, 07:30"');
+  state.flow = 'route';
+  state.step = 1;
+}
+function showFoodFollowup() {
+  botSay('🍽️ 맛집 추천 기능이에요! 골프장 이름과 선호하는 음식 종류(한식/고기/일식/해산물)를 알려주세요.\n예) "남서울 컨트리클럽, 고기"');
+  state.flow = 'food';
+  state.step = 1;
+}
+
+function resetFlow() {
+  state = { flow: null, step: 0, data: {} };
+}
+
+function handleWeatherFlow(text) {
+  const parts = text.split(/[,\s]+/).filter(Boolean);
+  let date = parts.find(p => /\d/.test(p)) || '6/21';
+  let course = text.replace(date, '').trim() || '골프장';
+  const w = mockWeather(course, date);
+  const reply =
+`📍 ${course} | 🗓️ ${date} 날씨 예보
+
+🌡️ 기온: ${w.temp}°C (체감 ${w.feels}°C)
+☔ 강수확률: ${w.rain}%
+🌬️ 바람: ${w.wind}
+${w.sky}
+
+${weatherTip(w)}
+
+다른 골프장/날짜도 확인하시려면 다시 말씀해주세요. "처음"을 입력하면 메뉴로 돌아갑니다.`;
+  botSay(reply);
+  resetFlow();
+}
+
+function handleRouteFlow(text) {
+  const parts = text.split(',').map(s => s.trim()).filter(Boolean);
+  const origin = parts[0] || '출발지';
+  const course = parts[1] || '골프장';
+  const teeTime = parts[2] && /\d{1,2}:\d{2}/.test(parts[2]) ? parts[2] : '07:30';
+
+  const r = mockRoute(origin, course, teeTime);
+  const recommendedBuffer = r.totalMin + 20; // 여유 버퍼
+  const departTime = subtractMinutes(teeTime, recommendedBuffer);
+  const isWeekend = [0, 6].includes(new Date().getDay());
+
+  const reply =
+`🚗 ${origin} → ${course}
+
+⏱️ 예상 소요시간: 약 ${r.totalMin}분 (기본 ${r.baseMin}분 + 교통혼잡 +${r.traffic}분)
+⛳ 티오프 시간: ${teeTime}
+🕐 추천 출발 시간: ${departTime} (여유 20분 포함)
+
+${isWeekend ? '📅 주말/공휴일은 교통이 혼잡할 수 있어 10~15분 더 일찍 출발하시는 걸 추천드려요.' : '📅 평일이라 비교적 도로가 원활할 거예요.'}
+
+도착 후 라운딩 준비(체크인, 락커, 연습장)에 최소 20분은 잡아두시는 게 좋아요!
+
+다른 경로를 확인하시려면 다시 말씀해주세요. "처음"을 입력하면 메뉴로 돌아갑니다.`;
+  botSay(reply);
+  resetFlow();
+}
+
+function handleFoodFlow(text) {
+  const parts = text.split(',').map(s => s.trim()).filter(Boolean);
+  const course = parts[0] || '골프장';
+  let category = parts[1];
+  const categories = Object.keys(restaurantDB);
+  if (!category || !categories.includes(category)) {
+    category = categories[hashStr(course) % categories.length];
+  }
+  const list = restaurantDB[category];
+  const lines = list.map((r, i) => `${i + 1}. 🍴 ${r.name}\n   대표메뉴: ${r.menu}\n   ${r.note}`).join('\n\n');
+
+  const reply =
+`📍 ${course} 주변 ${category} 맛집 추천
+
+${lines}
+
+다른 음식 종류(한식/고기/일식/해산물)도 추천해드릴까요? 이어서 입력해주세요.
+"처음"을 입력하면 메뉴로 돌아갑니다.`;
+  botSay(reply);
+  resetFlow();
+}
+
+function handleMessage(rawText) {
+  const text = rawText.trim();
+  if (!text) return;
+  addMessage(text, 'user');
+
+  if (/^처음$|^메뉴$|^reset$/i.test(text)) {
+    resetFlow();
+    botSay('처음 화면으로 돌아왔어요! 아래 메뉴 중 하나를 선택하거나 궁금한 걸 물어보세요 😊');
+    return;
+  }
+
+  if (state.flow === 'weather') return handleWeatherFlow(text);
+  if (state.flow === 'route') return handleRouteFlow(text);
+  if (state.flow === 'food') return handleFoodFlow(text);
+
+  if (/날씨/.test(text)) return showWeatherFollowup();
+  if (/경로|출발|길|교통/.test(text)) return showRouteFollowup();
+  if (/맛집|식당|밥|먹/.test(text)) return showFoodFollowup();
+  if (/준비물|체크리스트/.test(text)) {
+    botSay('🎒 라운딩 준비물 체크리스트\n\n' + checklist.join('\n'));
+    return;
+  }
+  if (/예약/.test(text)) {
+    botSay('📝 골프장 예약 팁\n\n- 주말/공휴일 인기 시간대는 2~4주 전 예약이 안전해요.\n- 우천 시 환불/연기 규정을 미리 확인하세요.\n- 4인 기준으로 예약하면 그린피 할인이 있는 골프장이 많아요.\n- 노쇼(No-show) 시 패널티가 있는 경우가 많으니 일정 변경은 빠르게 알리세요.');
+    return;
+  }
+
+  botSay('안녕하세요! ⛳ 무엇을 도와드릴까요?\n\n🌤️ "날씨" - 라운딩 날씨 체크\n🚗 "경로" - 출발시간/경로 안내\n🍽️ "맛집" - 주변 맛집 추천\n🎒 "준비물" - 체크리스트\n\n위 메뉴 버튼을 눌러도 됩니다!');
+}
+
+form.addEventListener('submit', (e) => {
+  e.preventDefault();
+  const text = input.value;
+  input.value = '';
+  handleMessage(text);
+});
+
+document.querySelectorAll('.quick-menu button').forEach(btn => {
+  btn.addEventListener('click', () => handleMessage(btn.dataset.cmd));
+});
+
+// initial greeting
+botSay('안녕하세요! ⛳ 골프 라운딩 메이트입니다.\n날씨, 이동 경로, 맛집까지 라운딩을 토탈 케어해드릴게요!\n\n아래 메뉴를 선택하거나 자유롭게 말씀해주세요 😊');
+</script>
+</body>
+</html>
